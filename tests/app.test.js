@@ -22,7 +22,7 @@ describe('Suite de Pruebas de Calidad de Software', () => {
 
     // VALIDACIÓN ADICIONAL 2: Valores grandes
     test('Debe calcular correctamente con valores grandes (100 * 100 = 10000)', () => {
-      const result = calculateValue(100, 100);
+      const result = calculateValue(1000, 100);
       expect(result).toBe(10000);
     });
   });
@@ -41,6 +41,7 @@ describe('Suite de Pruebas de Calidad de Software', () => {
       expect(response.body[0]).toHaveProperty('id');
       expect(response.body[0]).toHaveProperty('stock');
     });
+    
 
     // VALIDACIÓN ADICIONAL 3: Validar propiedad uptime en health
     test('GET /health - Debe retornar la propiedad uptime (tiempo en línea)', async () => {
