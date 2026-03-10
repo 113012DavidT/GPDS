@@ -1,37 +1,45 @@
-name: Node1.js CI
-
-
+name: Node.js CI with SonarQube
 
 on:
- push:
-   branches: [ "master" ]
- pull_request:
-   branches: [ "master" ]
-
-
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
 
 jobs:
- test:
-   runs-on: ubuntu-latest
-   strategy:
-         matrix:
-           node-version: [22.20.0,18.x]
-   steps:
-     - name: Checkout repository
-       uses: actions/checkout@v4
-     - name: Use Node.js ${{ matrix.node-version }}
-       uses: actions/setup-node@v4
-       with:
-         node-version: ${{ matrix.node-version }}
-         cache: 'npm'
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 22.x] # Simplificado para estabilidad
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
 
+      - name: Install dependencies
+        run: npm install
 
+      - name: Run Jest tests
+        run: npm test
 
-     - name: Install dependencies
-       run: npm install
-
-
-
-     - name: Run Jest tests
-       run: npm test
-
+  # --- AQUÍ ESTÁ LO NUEVO ---
+  sonarqube:
+    needs: test # Solo se ejecuta si los tests pasan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Importante para que Sonar analice el historial
+          
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
