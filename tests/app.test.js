@@ -22,7 +22,7 @@ describe('Suite de Pruebas de Calidad de Software', () => {
 
     // VALIDACIÓN ADICIONAL 2: Valores grandes
     test('Debe calcular correctamente con valores grandes (100 * 100 = 10000)', () => {
-      const result = calculateValue(1000, 100);
+      const result = calculateValue(100, 100);
       expect(result).toBe(10000);
     });
   });
