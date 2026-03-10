@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # Corregido aquí
       
       - name: Use Node.js 20.x
         uses: actions/setup-node@v4
@@ -24,7 +24,6 @@ jobs:
         run: npm install
 
       - name: Run Jest tests
-        # Mantenemos el || true por si quieres que Sonar analice aunque falle un test
         run: npm test || true 
 
   sonarqube-analysis:
@@ -33,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Clonación del repositorio (Checkout)
-        uses: actions/checkout@@v4
+        uses: actions/checkout@v4 # Corregido aquí también
         with:
           fetch-depth: 0 
           
