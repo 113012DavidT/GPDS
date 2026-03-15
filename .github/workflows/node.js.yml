@@ -92,4 +92,3 @@ jobs:
               -p 3000:3000 \
               --restart always \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
