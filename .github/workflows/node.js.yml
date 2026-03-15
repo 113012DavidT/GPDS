@@ -6,7 +6,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # CORRECCIÓN: Docker NO permite mayúsculas. Forzamos el nombre a minúsculas.
+  IMAGE_NAME: 113012davidt/gpds
 
 jobs:
   # 1. Fase de Calidad: Filtro SAST con SonarQube
@@ -67,6 +68,7 @@ jobs:
         with:
           context: .
           push: true
+          # Usamos la variable normalizada en minúsculas
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Deploy to Server via SSH
@@ -83,12 +85,12 @@ jobs:
             docker stop my-node-app || true
             docker rm my-node-app || true
             
-            # Descarga de la nueva imagen
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            # Descarga de la nueva imagen (usando el nombre en minúsculas)
+            docker pull ghcr.io/113012davidt/gpds:latest
             
             # Despliegue del nuevo contenedor
             docker run -d \
               --name my-node-app \
               -p 3000:3000 \
               --restart always \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+              ghcr.io/113012davidt/gpds:latest
