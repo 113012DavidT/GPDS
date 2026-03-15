@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Calidad y Despliegue
+name: CI/CD Pipeline - Entrega Final
 
 on:
   push:
@@ -9,7 +9,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # FASE 1: CALIDAD
+  # 1. Fase de Calidad
   quality:
     name: Análisis SonarQube
     runs-on: ubuntu-latest
@@ -27,9 +27,9 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://${{ secrets.SERVER_HOST }}/sonarqube
 
-  # FASE 2: RENDIMIENTO
+  # 2. Fase de Rendimiento
   performance:
-    name: Prueba de Carga K6
+    name: Prueba K6
     needs: quality
     runs-on: ubuntu-latest
     steps:
@@ -39,9 +39,9 @@ jobs:
         with:
           filename: performance-test.js
 
-  # FASE 3: EMPAQUETADO Y DESPLIEGUE
+  # 3. Fase de Construcción y Despliegue
   build-and-deploy:
-    name: Build Docker & Deploy SSH
+    name: Docker Build & SSH Deploy
     needs: performance
     runs-on: ubuntu-latest
     permissions:
@@ -64,7 +64,7 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Deploy to Cloud via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
