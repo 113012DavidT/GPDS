@@ -1,49 +1,78 @@
-name: CI Pipeline - Análisis SAST con SonarQube
+name: CI/CD Pipeline - Calidad y Despliegue
 
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  test:
-    name: Ejecución de Pruebas Unitarias (Jest)
+  # FASE 1: CALIDAD
+  quality:
+    name: Análisis SonarQube
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4 # Corregido aquí
-      
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
         with:
-          node-version: '20.x'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run Jest tests
-        run: npm test || true 
-
-  sonarqube-analysis:
-    name: Análisis de Calidad de Código (SAST)
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Clonación del repositorio (Checkout)
-        uses: actions/checkout@v4 # Corregido aquí también
-        with:
-          fetch-depth: 0 
-          
-      - name: Ejecución de Escáner SonarQube
+          fetch-depth: 0
+      - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@master
         with:
           args: >
             -Dsonar.projectKey=mi-proyecto-gestion-sw
-            -Dsonar.sources=.
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.qualitygate.wait=true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: http://${{ secrets.SERVER_HOST }}/sonarqube
+
+  # FASE 2: RENDIMIENTO
+  performance:
+    name: Prueba de Carga K6
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run k6 test
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: performance-test.js
+
+  # FASE 3: EMPAQUETADO Y DESPLIEGUE
+  build-and-deploy:
+    name: Build Docker & Deploy SSH
+    needs: performance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy to Cloud via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker stop my-node-app || true
+            docker rm my-node-app || true
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            docker run -d --name my-node-app -p 3000:3000 --restart always ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
