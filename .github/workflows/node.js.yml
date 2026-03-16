@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: 113012davidt/gpds # Tu repo específico
+  IMAGE_NAME: 113012davidt/gpds
 
 jobs:
   build-and-push:
@@ -39,18 +39,36 @@ jobs:
       - name: Deploy via SSH Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          # Entramos por el servidor que tiene IP pública (Nginx)
-          host: ${{ secrets.SERVER_HOST }}
+          # --- DESTINO FINAL (Servidor Privado) ---
+          host: ${{ secrets.DOCKER_SERVER_IP }} # IP INTERNA (Ej: 10.0.2.2)
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Saltamos internamente al que tiene Docker (IP Privada)
-          proxy_host: ${{ secrets.DOCKER_SERVER_IP }}
+          port: 22
+
+          # --- EL SALTO (Bastion / Nginx Público) ---
+          proxy_host: ${{ secrets.SERVER_HOST }} # IP PÚBLICA (Ej: 34.66.49.19 o 35.226.72.47)
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          proxy_port: 22
+
+          # --- CONFIGURACIÓN DE RED ---
+          timeout: 60s
+          proxy_timeout: 60s
+          
           script: |
-            # Esto se ejecuta solo en el servidor interno
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u 113012davidt --password-stdin
+            # 1. Login en el servidor interno
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # 2. Limpiar contenedor anterior
             docker stop my-node-app || true
             docker rm my-node-app || true
+            
+            # 3. Descargar imagen nueva
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            docker run -d --name my-node-app -p 3000:3000 --restart always ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            
+            # 4. Ejecutar
+            docker run -d \
+              --name my-node-app \
+              -p 3000:3000 \
+              --restart always \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
