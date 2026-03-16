@@ -60,30 +60,24 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   deploy:
-    name: Despliegue SSH
+    name: Despliegue vía Proxy (Nginx a Docker)
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - name: Deploy via SSH Proxy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
+          host: ${{ secrets.SERVER_HOST }}       # IP de NGINX (la .47)
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          timeout: 60s
+          # CONFIGURACIÓN DEL SALTO INTERNO:
+          proxy_host: ${{ secrets.DOCKER_SERVER_IP }} # IP PRIVADA del servidor Docker
+          proxy_username: ${{ secrets.SERVER_USER }}
+          proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Usamos la ruta completa /usr/bin/docker para evitar el error 'command not found'
-            echo ${{ secrets.GITHUB_TOKEN }} | /usr/bin/docker login ghcr.io -u 113012davidt --password-stdin
-            
-            /usr/bin/docker stop my-node-app || true
-            /usr/bin/docker rm my-node-app || true
-            /usr/bin/docker image prune -f
-            
-            /usr/bin/docker pull ghcr.io/113012davidt/gpds:latest
-            
-            /usr/bin/docker run -d \
-              --name my-node-app \
-              -p 3000:3000 \
-              --restart always \
-              ghcr.io/113012davidt/gpds:latest
+            # Estos comandos se ejecutarán en el SERVIDOR DOCKER después de saltar por Nginx
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u 113012davidt --password-stdin
+            docker stop my-node-app || true
+            docker rm my-node-app || true
+            docker pull ghcr.io/113012davidt/gpds:latest
+            docker run -d --name my-node-app -p 3000:3000 --restart always ghcr.io/113012davidt/gpds:latest
