@@ -60,33 +60,32 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   deploy:
-    name: Despliegue con Salto Proxy
+    name: Despliegue vía Proxy Jump
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via Proxy Jump
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          # 1. ENTRADA AL PROXY (Servidor Nginx)
+          # Entrada al Nginx
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          
-          # 2. SALTO AL DESTINO (Servidor Docker Privado)
+          # Salto al Docker (IP Privada)
           proxy_host: ${{ secrets.DOCKER_SERVER_IP }}
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           proxy_port: 22
-          
-          # 3. AJUSTES DE TIEMPO
-          timeout: 60s
-          proxy_timeout: 60s
-          
-          # 4. COMANDOS (Se ejecutan en el servidor Docker)
+          # Aumentamos el timeout para el salto de red
+          timeout: 100s
+          proxy_timeout: 100s
+          script_stop: true # Para que si un comando falla, nos avise de inmediato
           script: |
+            echo "--- Conectado exitosamente al Servidor Docker ---"
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u 113012davidt --password-stdin
             docker stop my-node-app || true
             docker rm my-node-app || true
             docker pull ghcr.io/113012davidt/gpds:latest
             docker run -d --name my-node-app -p 3000:3000 --restart always ghcr.io/113012davidt/gpds:latest
+            echo "--- Despliegue completado ---"
