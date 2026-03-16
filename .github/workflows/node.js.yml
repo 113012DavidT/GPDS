@@ -9,21 +9,20 @@ env:
   IMAGE_NAME: 113012davidt/gpds
 
 jobs:
-  # --- ETAPA 1: ANÁLISIS DE CALIDAD CON SONARQUBE ---
+  # --- ETAPA 1: ANÁLISIS DE CALIDAD (SonarQube) ---
   sonarqube:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Importante para que SonarQube analice el historial
+          fetch-depth: 0
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        # Si SonarQube falla, el pipeline se detendrá aquí
 
-  # --- ETAPA 2: PRUEBAS DE RENDIMIENTO CON K6 ---
+  # --- ETAPA 2: PRUEBA DE RENDIMIENTO (K6) ---
   performance-test:
     needs: sonarqube
     runs-on: ubuntu-latest
@@ -33,10 +32,9 @@ jobs:
       - name: Run k6 test
         uses: grafana/k6-action@v0.3.1
         with:
-          filename: tests/performance_test.js # Asegúrate de tener este archivo en tu repo
-        # Si k6 detecta que el rendimiento es bajo, el pipeline se detiene
+          filename: performance-test.js # Ajustado a la raíz según tu imagen
 
-  # --- ETAPA 3: EMPAQUETADO (DOCKER) ---
+  # --- ETAPA 3: EMPAQUETADO (Docker) ---
   build-and-push:
     needs: performance-test
     runs-on: ubuntu-latest
@@ -59,7 +57,7 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE AUTOMÁTICO (CD) ---
+  # --- ETAPA 4: DESPLIEGUE (CD) ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -67,18 +65,21 @@ jobs:
       - name: Deploy via SSH Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          # Servidor Destino Interno
+          # Servidor Destino (Interno)
           host: ${{ secrets.DOCKER_SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Salto por el Bastion/Nginx Público
+          # Salto por el Bastion (Público)
           proxy_host: ${{ secrets.SERVER_HOST }}
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 60s
           script: |
+            # Login en GHCR dentro del servidor
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Detener y limpiar contenedor viejo
             docker stop my-node-app || true
             docker rm my-node-app || true
+            # Bajar la imagen nueva y correrla
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             docker run -d --name my-node-app -p 3000:3000 --restart always ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
