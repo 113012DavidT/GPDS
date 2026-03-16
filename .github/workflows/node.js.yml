@@ -9,7 +9,7 @@ env:
   IMAGE_NAME: 113012davidt/gpds
 
 jobs:
-  quality-analysis:
+  quality:
     name: Análisis SonarQube
     runs-on: ubuntu-latest
     steps:
@@ -26,9 +26,9 @@ jobs:
             -Dsonar.projectKey=mi-proyecto-gestion-sw
             -Dsonar.qualitygate.wait=true
 
-  performance-test:
+  performance:
     name: Pruebas K6
-    needs: quality-analysis
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,9 +37,9 @@ jobs:
         with:
           filename: performance-test.js
 
-  build-and-push:
+  build:
     name: Docker Build
-    needs: performance-test
+    needs: performance
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,22 +60,27 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   deploy:
-    name: Despliegue vía Proxy (Nginx a Docker)
-    needs: build-and-push
+    name: Despliegue con Salto Proxy
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH Proxy
+      - name: Deploy via Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}       # IP de NGINX (la .47)
+          # Paso 1: Entrar a Nginx
+          host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # CONFIGURACIÓN DEL SALTO INTERNO:
-          proxy_host: ${{ secrets.DOCKER_SERVER_IP }} # IP PRIVADA del servidor Docker
+          # Paso 2: Saltar a la IP Privada de Docker
+          proxy_host: ${{ secrets.DOCKER_SERVER_IP }}
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          proxy_port: 22
+          timeout: 60s
+          proxy_timeout: 60s
           script: |
-            # Estos comandos se ejecutarán en el SERVIDOR DOCKER después de saltar por Nginx
+            # Esto se ejecuta DENTRO de la red privada (Servidor Docker)
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u 113012davidt --password-stdin
             docker stop my-node-app || true
             docker rm my-node-app || true
