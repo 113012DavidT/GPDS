@@ -67,20 +67,24 @@ jobs:
       - name: Deploy via Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          # Paso 1: Entrar a Nginx
+          # 1. ENTRADA AL PROXY (Servidor Nginx)
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Paso 2: Saltar a la IP Privada de Docker
+          port: 22
+          
+          # 2. SALTO AL DESTINO (Servidor Docker Privado)
           proxy_host: ${{ secrets.DOCKER_SERVER_IP }}
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
           proxy_port: 22
+          
+          # 3. AJUSTES DE TIEMPO
           timeout: 60s
           proxy_timeout: 60s
+          
+          # 4. COMANDOS (Se ejecutan en el servidor Docker)
           script: |
-            # Esto se ejecuta DENTRO de la red privada (Servidor Docker)
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u 113012davidt --password-stdin
             docker stop my-node-app || true
             docker rm my-node-app || true
