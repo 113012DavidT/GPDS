@@ -1,4 +1,4 @@
-name: CI/CD Pipeline 
+name: CI/CD Pipeline - Observabilidad Completa
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
       - name: Run k6 test
         uses: grafana/k6-action@v0.3.1
         with:
-          filename: performance-test.js # Ajustado a la raíz según tu imagen
+          filename: performance-test.js
 
   # --- ETAPA 3: EMPAQUETADO (Docker) ---
   build-and-push:
@@ -57,29 +57,49 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE (CD) ---
+  # --- ETAPA 4: DESPLIEGUE (CD con Docker Compose y Proxy Jump) ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. ENVIAR ARCHIVOS DE CONFIGURACIÓN (YML) AL SERVIDOR
+      - name: Copy config files via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }} # El Bastion/Nginx
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # Salto al destino interno
+          proxy_host: ${{ secrets.DOCKER_SERVER_IP }}
+          proxy_username: ${{ secrets.SERVER_USER }}
+          proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml,prometheus.yml"
+          target: "~/monitoring"
+
+      # 2. EJECUTAR DESPLIEGUE MULTI-CONTENEDOR
       - name: Deploy via SSH Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          # Servidor Destino (Interno)
           host: ${{ secrets.DOCKER_SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Salto por el Bastion (Público)
           proxy_host: ${{ secrets.SERVER_HOST }}
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 60s
+          timeout: 120s
           script: |
-            # Login en GHCR dentro del servidor
+            mkdir -p ~/monitoring
+            cd ~/monitoring
+            
+            # Login en GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            # Detener y limpiar contenedor viejo
-            docker stop my-node-app || true
-            docker rm my-node-app || true
-            # Bajar la imagen nueva y correrla
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            docker run -d --name my-node-app -p 3000:3000 --restart always ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            
+            # Actualizar y levantar el stack de observabilidad
+            docker-compose down || true
+            docker-compose pull
+            docker-compose up -d
+            
+            echo "Pipeline completado: App, Prometheus y Grafana están activos."
