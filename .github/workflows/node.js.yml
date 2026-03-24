@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Observabilidad Completa
+name: CI/CD Pipeline - Observabilidad Final
 
 on:
   push:
@@ -9,7 +9,7 @@ env:
   IMAGE_NAME: 113012davidt/gpds
 
 jobs:
-  # --- ETAPA 1: ANÁLISIS DE CALIDAD (SonarQube) ---
+  # --- ETAPA 1: CALIDAD ---
   sonarqube:
     runs-on: ubuntu-latest
     steps:
@@ -22,19 +22,18 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-  # --- ETAPA 2: PRUEBA DE RENDIMIENTO (K6) ---
+  # --- ETAPA 2: RENDIMIENTO ---
   performance-test:
     needs: sonarqube
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Run k6 test
+      - uses: actions/checkout@v4
+      - name: Run k6
         uses: grafana/k6-action@v0.3.1
         with:
           filename: performance-test.js
 
-  # --- ETAPA 3: EMPAQUETADO (Docker) ---
+  # --- ETAPA 3: CONSTRUCCIÓN ---
   build-and-push:
     needs: performance-test
     runs-on: ubuntu-latest
@@ -42,8 +41,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -57,7 +55,7 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE (CD con Docker Compose y Proxy Jump) ---
+  # --- ETAPA 4: DESPLIEGUE SEGURO ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -65,41 +63,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. ENVIAR ARCHIVOS DE CONFIGURACIÓN (YML) AL SERVIDOR
-      - name: Copy config files via SCP
+      # Copiar archivos YML al servidor interno pasando por el Bastion
+      - name: Copy Config Files (SCP)
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.SERVER_HOST }} # El Bastion/Nginx
+          host: ${{ secrets.SERVER_HOST }}        # IP Pública .47
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Salto al destino interno
-          proxy_host: ${{ secrets.DOCKER_SERVER_IP }}
+          proxy_host: ${{ secrets.DOCKER_SERVER_IP }} # IP Privada 10.0.2.2
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "docker-compose.yml,prometheus.yml"
           target: "~/monitoring"
+          timeout: 120s
+          proxy_timeout: 120s
 
-      # 2. EJECUTAR DESPLIEGUE MULTI-CONTENEDOR
+      # Levantar el stack completo en el servidor interno
       - name: Deploy via SSH Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DOCKER_SERVER_IP }}
+          host: ${{ secrets.DOCKER_SERVER_IP }}   # Destino Final
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          proxy_host: ${{ secrets.SERVER_HOST }}
+          proxy_host: ${{ secrets.SERVER_HOST }}  # Salto por Nginx
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
+          proxy_timeout: 120s
           script: |
             mkdir -p ~/monitoring
             cd ~/monitoring
-            
-            # Login en GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Actualizar y levantar el stack de observabilidad
             docker-compose down || true
             docker-compose pull
             docker-compose up -d
-            
-            echo "Pipeline completado: App, Prometheus y Grafana están activos."
+            echo "--- Despliegue de App + Prometheus + Grafana finalizado ---"
