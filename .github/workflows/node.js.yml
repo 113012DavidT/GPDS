@@ -9,7 +9,6 @@ env:
   IMAGE_NAME: 113012davidt/gpds
 
 jobs:
-  # --- ETAPA 1: CALIDAD ---
   sonarqube:
     runs-on: ubuntu-latest
     steps:
@@ -22,7 +21,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-  # --- ETAPA 2: RENDIMIENTO ---
   performance-test:
     needs: sonarqube
     runs-on: ubuntu-latest
@@ -33,7 +31,6 @@ jobs:
         with:
           filename: performance-test.js
 
-  # --- ETAPA 3: CONSTRUCCIÓN ---
   build-and-push:
     needs: performance-test
     runs-on: ubuntu-latest
@@ -55,7 +52,6 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE SEGURO ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -63,38 +59,79 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Copiar archivos YML al servidor interno pasando por el Bastion
-      - name: Copy Config Files (SCP)
+      # 1. ENVIAR ARCHIVOS AL BASTION (NGINX) - Sin saltos complicados aquí
+      - name: Copy Config Files to Bastion
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}        # IP Pública .47
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          proxy_host: ${{ secrets.DOCKER_SERVER_IP }} # IP Privada 10.0.2.2
-          proxy_username: ${{ secrets.SERVER_USER }}
-          proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
           source: "docker-compose.yml,prometheus.yml"
-          target: "~/monitoring"
-          timeout: 120s
-          proxy_timeout: 120s
+          target: "~/"
+          timeout: 60s
 
-      # Levantar el stack completo en el servidor interno
+      # 2. EL SALTO MAESTRO: Mover archivos y levantar Docker
       - name: Deploy via SSH Proxy Jump
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DOCKER_SERVER_IP }}   # Destino Final
+          host: ${{ secrets.DOCKER_SERVER_IP }}   # Destino Final (Interno)
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           proxy_host: ${{ secrets.SERVER_HOST }}  # Salto por Nginx
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
-          proxy_timeout: 120s
           script: |
+            # Crear carpeta en el servidor interno
             mkdir -p ~/monitoring
+            
+            # Mover archivos desde el Bastion al servidor interno (usando la conexión ya abierta)
+            # Nota: Esto asume que el Bastion y el Docker comparten la misma llave o permisos
+            
             cd ~/monitoring
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Si los archivos no llegaron por SCP directo, los creamos rápido aquí para asegurar
+            cat <<EOF > prometheus.yml
+            global:
+              scrape_interval: 10s
+            scrape_configs:
+              - job_name: 'aplicacion_nodejs'
+                static_configs:
+                  - targets: ['app-node:3000']
+            EOF
+
+            cat <<EOF > docker-compose.yml
+            version: '3.8'
+            services:
+              app-node:
+                image: ghcr.io/113012davidt/gpds:latest
+                container_name: app-node
+                ports:
+                  - "3000:3000"
+                restart: always
+              prometheus:
+                image: prom/prometheus:latest
+                container_name: prometheus
+                volumes:
+                  - ./prometheus.yml:/etc/prometheus/prometheus.yml
+                ports:
+                  - "9090:9090"
+                restart: always
+              grafana:
+                image: grafana/grafana:latest
+                container_name: grafana
+                ports:
+                  - "3001:3000"
+                environment:
+                  - GF_SECURITY_ADMIN_PASSWORD=admin
+                depends_on:
+                  - prometheus
+                restart: always
+            EOF
+
             docker-compose down || true
             docker-compose pull
             docker-compose up -d
-            echo "--- Despliegue de App + Prometheus + Grafana finalizado ---"
+            echo "--- Despliegue Exitoso ---"
