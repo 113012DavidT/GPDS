@@ -21,8 +21,6 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-          # Añadimos más tiempo para que el reporte suba sin dar 502
-          SONAR_SCANNER_OPTS: -Dsonar.ws.timeout=300 
 
   # --- ETAPA 2: RENDIMIENTO (K6) ---
   performance-test:
@@ -80,7 +78,7 @@ jobs:
             
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # Crear prometheus.yml según el laboratorio
+            # 1. Crear prometheus.yml (Configuración del Laboratorio)
             cat <<EOF > prometheus.yml
             global:
               scrape_interval: 10s
@@ -93,7 +91,7 @@ jobs:
                   - targets: ['app-node:3000']
             EOF
 
-            # Crear docker-compose.yml con los 4 servicios del manual
+            # 2. Crear docker-compose.yml (Infraestructura del Laboratorio)
             cat <<EOF > docker-compose.yml
             version: '3.8'
             services:
@@ -142,6 +140,7 @@ jobs:
                 restart: always
             EOF
 
+            # Desplegar stack completo
             docker-compose down || true
             docker-compose pull
             docker-compose up -d --force-recreate
