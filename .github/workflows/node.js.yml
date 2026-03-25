@@ -55,7 +55,7 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE (CD con Observabilidad Completa) ---
+  # --- ETAPA 4: DESPLIEGUE  ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -91,7 +91,7 @@ jobs:
                   - targets: ['app-node:3000']
             EOF
 
-            # 2. Crear docker-compose.yml (Infraestructura del Laboratorio)
+            # 2. Crear docker-compose.yml (Infraestructura)
             cat <<EOF > docker-compose.yml
             version: '3.8'
             services:
