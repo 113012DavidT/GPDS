@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: 113012davidt/gpds # Ajustado a tu imagen real
+  IMAGE_NAME: 113012davidt/gpds
 
 jobs:
   quality-analysis:
@@ -37,7 +37,7 @@ jobs:
       - name: k6
         uses: grafana/k6-action@v0.3.1
         with:
-          filename: performance-test.js 
+          filename: performance-test.js
 
   build-and-push:
     name: Build Docker Image
@@ -68,26 +68,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # Necesario para leer los archivos prometheus.yml y docker-compose.yml
-      
+        uses: actions/checkout@v4
       - name: SSH Deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DOCKER_SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          proxy_host: ${{ secrets.SERVER_HOST }} # Si usas Bastion/Nginx
+          proxy_host: ${{ secrets.SERVER_HOST }}
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             mkdir -p ~/monitoring
             cd ~/monitoring
-            
-            # Login en el registro
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # --- CREAR LOS ARCHIVOS QUE NECESITA DOCKER-COMPOSE ---
-            # Esto es lo que le faltaba a tu pipeline:
+            # Crear prometheus.yml (Configuración Lab)
             cat <<EOF > prometheus.yml
             global:
               scrape_interval: 10s
@@ -100,6 +96,7 @@ jobs:
                   - targets: ['app-node:3000']
             EOF
 
+            # Crear docker-compose.yml (Infraestructura Lab)
             cat <<EOF > docker-compose.yml
             version: '3.8'
             services:
@@ -140,8 +137,6 @@ jobs:
                   - prometheus
             EOF
 
-            # Levantar todo
-            sudo docker-compose down || true
-            sudo docker-compose pull
-            sudo docker-compose up -d
-            sudo docker image prune -f
+            docker-compose down || true
+            docker-compose up -d --force-recreate
+            docker image prune -f
