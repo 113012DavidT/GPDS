@@ -9,7 +9,6 @@ env:
   IMAGE_NAME: 113012davidt/gpds
 
 jobs:
-  # --- ETAPA 1: CALIDAD (SonarQube) ---
   sonarqube:
     runs-on: ubuntu-latest
     steps:
@@ -21,8 +20,8 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_SCANNER_OPTS: "-Dsonar.ws.timeout=600"
 
-  # --- ETAPA 2: RENDIMIENTO (K6) ---
   performance-test:
     needs: sonarqube
     runs-on: ubuntu-latest
@@ -33,7 +32,6 @@ jobs:
         with:
           filename: performance-test.js
 
-  # --- ETAPA 3: EMPAQUETADO (Docker) ---
   build-and-push:
     needs: performance-test
     runs-on: ubuntu-latest
@@ -55,7 +53,6 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE (CD con Observabilidad Completa) ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -75,10 +72,9 @@ jobs:
           script: |
             mkdir -p ~/monitoring
             cd ~/monitoring
-            
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # 1. Crear prometheus.yml (Configuración del Laboratorio)
+            # 1. Configuración Prometheus (Laboratorio Parte 2)
             cat <<EOF > prometheus.yml
             global:
               scrape_interval: 10s
@@ -91,7 +87,7 @@ jobs:
                   - targets: ['app-node:3000']
             EOF
 
-            # 2. Crear docker-compose.yml (Infraestructura del Laboratorio)
+            # 2. Docker Compose (Laboratorio Parte 3)
             cat <<EOF > docker-compose.yml
             version: '3.8'
             services:
@@ -101,7 +97,6 @@ jobs:
                 ports:
                   - "3000:3000"
                 restart: always
-
               node-exporter:
                 image: prom/node-exporter:latest
                 container_name: node-exporter
@@ -116,7 +111,6 @@ jobs:
                 ports:
                   - "9100:9100"
                 restart: always
-
               prometheus:
                 image: prom/prometheus:latest
                 container_name: prometheus
@@ -125,7 +119,6 @@ jobs:
                 ports:
                   - "9090:9090"
                 restart: always
-
               grafana:
                 image: grafana/grafana:latest
                 container_name: grafana
@@ -140,7 +133,7 @@ jobs:
                 restart: always
             EOF
 
-            # Desplegar stack completo
             docker-compose down || true
             docker-compose pull
             docker-compose up -d --force-recreate
+            docker image prune -f
