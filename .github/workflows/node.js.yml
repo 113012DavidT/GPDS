@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Laboratorio Observabilidad Final
+name: Pipeline de Control de Calidad y Despliegue Automático
 
 on:
   push:
@@ -6,47 +6,56 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: 113012davidt/gpds
+  IMAGE_NAME: 113012davidt/gpds # Ajustado a tu imagen real
 
 jobs:
-  sonarqube:
+  quality-analysis:
+    name: Análisis Estático (SonarQube)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
+        uses: SonarSource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-          SONAR_SCANNER_OPTS: "-Dsonar.ws.timeout=600"
+        with:
+          args: >
+            -Dsonar.projectKey=mi-proyecto-gestion-sw
+            -Dsonar.sources=.
 
   performance-test:
-    needs: sonarqube
+    name: Pruebas de Carga (K6)
+    needs: quality-analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Run k6 test
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: k6
         uses: grafana/k6-action@v0.3.1
         with:
-          filename: performance-test.js
+          filename: performance-test.js 
 
   build-and-push:
+    name: Build Docker Image
     needs: performance-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Log in to GHCR
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
+      - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -54,27 +63,31 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   deploy:
+    name: Despliegue en Servidor
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Deploy via SSH Proxy Jump
+      - name: Checkout
+        uses: actions/checkout@v4 # Necesario para leer los archivos prometheus.yml y docker-compose.yml
+      
+      - name: SSH Deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DOCKER_SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          proxy_host: ${{ secrets.SERVER_HOST }}
+          proxy_host: ${{ secrets.SERVER_HOST }} # Si usas Bastion/Nginx
           proxy_username: ${{ secrets.SERVER_USER }}
           proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 180s
           script: |
             mkdir -p ~/monitoring
             cd ~/monitoring
+            
+            # Login en el registro
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # 1. Configuración Prometheus (Laboratorio Parte 2)
+            # --- CREAR LOS ARCHIVOS QUE NECESITA DOCKER-COMPOSE ---
+            # Esto es lo que le faltaba a tu pipeline:
             cat <<EOF > prometheus.yml
             global:
               scrape_interval: 10s
@@ -87,7 +100,6 @@ jobs:
                   - targets: ['app-node:3000']
             EOF
 
-            # 2. Docker Compose (Laboratorio Parte 3)
             cat <<EOF > docker-compose.yml
             version: '3.8'
             services:
@@ -110,7 +122,6 @@ jobs:
                   - '--path.sysfs=/host/sys'
                 ports:
                   - "9100:9100"
-                restart: always
               prometheus:
                 image: prom/prometheus:latest
                 container_name: prometheus
@@ -118,7 +129,6 @@ jobs:
                   - ./prometheus.yml:/etc/prometheus/prometheus.yml
                 ports:
                   - "9090:9090"
-                restart: always
               grafana:
                 image: grafana/grafana:latest
                 container_name: grafana
@@ -126,14 +136,12 @@ jobs:
                   - "3001:3000"
                 environment:
                   - GF_SECURITY_ADMIN_PASSWORD=admin
-                  - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
-                  - GF_SERVER_SERVE_FROM_SUB_PATH=true
                 depends_on:
                   - prometheus
-                restart: always
             EOF
 
-            docker-compose down || true
-            docker-compose pull
-            docker-compose up -d --force-recreate
-            docker image prune -f
+            # Levantar todo
+            sudo docker-compose down || true
+            sudo docker-compose pull
+            sudo docker-compose up -d
+            sudo docker image prune -f
