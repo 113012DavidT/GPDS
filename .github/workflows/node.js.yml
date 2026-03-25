@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Entrega Final
+name: CI/CD Pipeline - Laboratorio Observabilidad
 
 on:
   push:
@@ -9,7 +9,6 @@ env:
   IMAGE_NAME: 113012davidt/gpds
 
 jobs:
-  # --- ETAPA 1: CALIDAD (SonarQube) ---
   sonarqube:
     runs-on: ubuntu-latest
     steps:
@@ -18,12 +17,10 @@ jobs:
           fetch-depth: 0
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@master
-        # No usamos continue-on-error porque queremos que funcione sí o sí
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-  # --- ETAPA 2: RENDIMIENTO (K6) ---
   performance-test:
     needs: sonarqube
     runs-on: ubuntu-latest
@@ -34,7 +31,6 @@ jobs:
         with:
           filename: performance-test.js
 
-  # --- ETAPA 3: EMPAQUETADO (Docker) ---
   build-and-push:
     needs: performance-test
     runs-on: ubuntu-latest
@@ -56,7 +52,6 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # --- ETAPA 4: DESPLIEGUE (CD con Observabilidad) ---
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -77,22 +72,31 @@ jobs:
             mkdir -p ~/monitoring
             cd ~/monitoring
             
-            # Login en GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # Generar archivos de configuración directo en el server
+            # --- PARTE 2: Configurar Prometheus (Como pide el Laboratorio) ---
             cat <<EOF > prometheus.yml
             global:
               scrape_interval: 10s
+
             scrape_configs:
-              - job_name: 'node-app'
+              # Trabajo 1: Monitorea el servidor usando Node Exporter
+              - job_name: 'servidor'
+                static_configs:
+                  - targets: ['node-exporter:9100']
+
+              # Trabajo 2: Monitorea el Contenedor (La App Node.js)
+              - job_name: 'aplicacion_nodejs'
                 static_configs:
                   - targets: ['app-node:3000']
             EOF
 
+            # --- PARTE 3: Docker Compose (Ajustado al Laboratorio) ---
             cat <<EOF > docker-compose.yml
             version: '3.8'
+
             services:
+              # 1. Nuestra Aplicación Web
               app-node:
                 image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
                 container_name: app-node
@@ -100,6 +104,24 @@ jobs:
                   - "3000:3000"
                 restart: always
 
+              # 2. Agente de Hardware (CPU, RAM, Disco)
+              node-exporter:
+                image: prom/node-exporter:latest
+                container_name: node-exporter
+                volumes:
+                  - /proc:/host/proc:ro
+                  - /sys:/host/sys:ro
+                  - /:/rootfs:ro
+                command:
+                  - '--path.procfs=/host/proc'
+                  - '--path.rootfs=/rootfs'
+                  - '--path.sysfs=/host/sys'
+                  - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+                ports:
+                  - "9100:9100"
+                restart: always
+
+              # 3. Base de Datos de Métricas
               prometheus:
                 image: prom/prometheus:latest
                 container_name: prometheus
@@ -109,6 +131,7 @@ jobs:
                   - "9090:9090"
                 restart: always
 
+              # 4. El Visualizador Gráfico
               grafana:
                 image: grafana/grafana:latest
                 container_name: grafana
@@ -123,8 +146,7 @@ jobs:
                 restart: always
             EOF
 
-            # Reiniciar stack
+            # Ejecutar el despliegue
             docker-compose down || true
             docker-compose pull
             docker-compose up -d --force-recreate
-            
